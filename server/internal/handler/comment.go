@@ -1542,6 +1542,7 @@ type commentAgentTrigger struct {
 }
 
 type commentTriggerComputeOptions struct {
+	CommentType             string
 	ThreadCommentID         pgtype.UUID
 	ExcludeTriggerCommentID pgtype.UUID
 	// AuthoringTaskID is the server-trusted task that wrote an agent comment.
@@ -1661,6 +1662,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	if actorType == "agent" {
 		opts.AuthoringTaskID = h.commentSourceTaskID(r)
 	}
+	opts.CommentType = "comment"
 	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{
 		Agents:  make([]CommentTriggerAgentResponse, 0, len(triggers)),
@@ -2041,6 +2043,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
 		AuthoringTaskID:         comment.SourceTaskID,
+		CommentType:             comment.Type,
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
@@ -2737,6 +2740,9 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if actorType != "member" {
+		if opts.CommentType == "progress_update" {
+			return nil, nil
+		}
 		// Agent-authored comments do not participate in the member-driven
 		// conversation routing (parent-author / thread-root continuation) or
 		// the member assignee fallback. Worker-result comments retain the
@@ -3083,6 +3089,26 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
 		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
 		return commentAgentTrigger{}, false
+	}
+	// A plain agent comment only hands control back to the assigned leader
+	// when its authenticated source task was genuinely delegated by that
+	// leader on this issue. Progress updates and platform/system notices are
+	// observations, not delivered work. Explicit mentions route earlier.
+	if authorType != "member" {
+		if authorType != "agent" || opts.CommentType == "progress_update" || !opts.AuthoringTaskID.Valid {
+			return commentAgentTrigger{}, false
+		}
+		worker, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+		if err != nil || worker.IsLeaderTask || !worker.DelegatedFromTaskID.Valid ||
+			worker.AgentID != parseUUID(authorID) || worker.IssueID != issue.ID ||
+			(worker.SquadID.Valid && worker.SquadID != squad.ID) {
+			return commentAgentTrigger{}, false
+		}
+		leader, err := h.Queries.GetAgentTask(ctx, worker.DelegatedFromTaskID)
+		if err != nil || !leader.IsLeaderTask || leader.AgentID != squad.LeaderID ||
+			leader.IssueID != issue.ID || leader.SquadID != squad.ID {
+			return commentAgentTrigger{}, false
+		}
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          squad.LeaderID,
@@ -4034,6 +4060,7 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID: comment.ID,
 			AuthoringTaskID:         comment.SourceTaskID,
+			CommentType:             comment.Type,
 			OriginatorUserID:        originatorUserID,
 		})
 		targets := targetsByComment[uuidToString(comment.ID)]

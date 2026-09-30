@@ -73,7 +73,7 @@ func TestCreateComment_GuestSquadWorkerRouting_GH8301(t *testing.T) {
 		{mode: "live", name: "live guest delegation", wantGuest: 1},
 		{mode: "leader_changed", name: "changed guest leader fails closed"},
 		{mode: "permission_denied", name: "guest permission denied fails closed"},
-		{mode: "deleted", name: "deleted guest delegation uses assigned squad", wantAssigned: 1},
+		{mode: "deleted", name: "deleted guest delegation cannot claim assigned squad"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,8 +239,8 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 1 {
-		t.Fatalf("after worker comment: expected 1 queued leader task for L, got %d", leaderTasks)
+	if leaderTasks != 0 {
+		t.Fatalf("unverified worker comment queued %d leader tasks", leaderTasks)
 	}
 }
 
@@ -312,8 +312,8 @@ func TestCreateComment_WorkerAgentCommentQueuesSeparatelyFromLeaderAssignment(t 
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 2 {
-		t.Fatalf("expected separate assignment and comment tasks, got %d", leaderTasks)
+	if leaderTasks != 1 {
+		t.Fatalf("unverified comment should leave only assignment task, got %d", leaderTasks)
 	}
 }
 
