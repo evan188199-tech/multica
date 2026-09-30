@@ -17,5 +17,5 @@ WHERE owner_id = @owner_id AND group_key = @group_key;
 -- name: ListAgentQuotaGroupRuntimes :many
 SELECT DISTINCT runtime_id FROM agent
 WHERE owner_id = @owner_id
-  AND runtime_config->>'quota_group' = @group_key::text
+  AND btrim(runtime_config->>'quota_group') = @group_key::text
   AND runtime_id IS NOT NULL;

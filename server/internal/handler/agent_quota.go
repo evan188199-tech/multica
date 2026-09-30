@@ -43,6 +43,11 @@ func (h *Handler) ClearAgentQuotaGroup(w http.ResponseWriter, r *http.Request) {
 	if !ok || !h.canManageAgent(w, r, agent) {
 		return
 	}
+	// This gate belongs to the agent owner across workspaces.
+	if uuidToString(agent.OwnerID) != requestUserID(r) {
+		writeError(w, http.StatusForbidden, "only the agent owner can clear the quota group")
+		return
+	}
 	key := quotagroup.FromRuntimeConfig(agent.RuntimeConfig)
 	if key == "" {
 		writeError(w, http.StatusBadRequest, "agent has no valid quota_group")

@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestQuotaGroupBlocksSharedAgentsUntilOwnerClears(t *testing.T) {
@@ -20,7 +22,7 @@ func TestQuotaGroupBlocksSharedAgentsUntilOwnerClears(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_quota_group_block WHERE owner_id=$1 AND group_key='kimi-shared'`, testUserID)
 	})
 	runtime := dbfx.Runtime(t, "quota-group-test")
-	configured := testutil.Raw(`'{"quota_group":"kimi-shared"}'::jsonb`)
+	configured := testutil.Raw(`'{"quota_group":" kimi-shared "}'::jsonb`)
 	otherConfigured := testutil.Raw(`'{"quota_group":"unrelated"}'::jsonb`)
 	first := dbfx.Agent(t, "quota-first", runtime, testutil.Cols{"runtime_config": configured})
 	second := dbfx.Agent(t, "quota-second", runtime, testutil.Cols{"runtime_config": configured})
@@ -59,6 +61,18 @@ func TestQuotaGroupBlocksSharedAgentsUntilOwnerClears(t *testing.T) {
 	testHandler.GetAgentQuotaGroup(w, get)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"blocked":true`) {
 		t.Fatalf("quota status = %d %s", w.Code, w.Body.String())
+	}
+	adminID := dbfx.User(t, "quota-workspace-admin", "quota-admin-"+uuid.NewString()+"@multica.test")
+	dbfx.Member(t, testWorkspaceID, adminID, "admin")
+	adminClear := withURLParam(newRequestAs(adminID, http.MethodPost, "/api/agents/"+second+"/quota/clear", nil), "id", second)
+	w = httptest.NewRecorder()
+	testHandler.ClearAgentQuotaGroup(w, adminClear)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("workspace admin cleared someone else's provider gate: %d %s", w.Code, w.Body.String())
+	}
+	stillBlocked, err := testHandler.Queries.GetAgentQuotaGroupBlock(ctx, db.GetAgentQuotaGroupBlockParams{OwnerID: parseUUID(testUserID), GroupKey: "kimi-shared"})
+	if err != nil || stillBlocked.GroupKey != "kimi-shared" {
+		t.Fatalf("quota gate lost after unauthorized clear: %+v, err %v", stillBlocked, err)
 	}
 	clear := withURLParam(newRequest(http.MethodPost, "/api/agents/"+second+"/quota/clear", nil), "id", second)
 	w = httptest.NewRecorder()

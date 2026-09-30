@@ -777,7 +777,7 @@ WHERE id = (
             AND NOT EXISTS (
                 SELECT 1 FROM agent_quota_group_block b
                 WHERE b.owner_id = a.owner_id
-                  AND b.group_key = a.runtime_config->>'quota_group'
+                  AND b.group_key = btrim(a.runtime_config->>'quota_group')
             )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
@@ -2316,7 +2316,7 @@ WHERE atq.runtime_id = $1
         AND NOT EXISTS (
             SELECT 1 FROM agent_quota_group_block b
             WHERE b.owner_id = a.owner_id
-              AND b.group_key = a.runtime_config->>'quota_group'
+              AND b.group_key = btrim(a.runtime_config->>'quota_group')
         )
         AND (
             r.visibility = 'public'
@@ -2442,7 +2442,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
         AND NOT EXISTS (
             SELECT 1 FROM agent_quota_group_block b
             WHERE b.owner_id = a.owner_id
-              AND b.group_key = a.runtime_config->>'quota_group'
+              AND b.group_key = btrim(a.runtime_config->>'quota_group')
         )
         AND (
             r.visibility = 'public'

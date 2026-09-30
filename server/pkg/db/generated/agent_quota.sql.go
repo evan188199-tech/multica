@@ -55,7 +55,7 @@ func (q *Queries) GetAgentQuotaGroupBlock(ctx context.Context, arg GetAgentQuota
 const listAgentQuotaGroupRuntimes = `-- name: ListAgentQuotaGroupRuntimes :many
 SELECT DISTINCT runtime_id FROM agent
 WHERE owner_id = $1
-  AND runtime_config->>'quota_group' = $2::text
+  AND btrim(runtime_config->>'quota_group') = $2::text
   AND runtime_id IS NOT NULL
 `
 
