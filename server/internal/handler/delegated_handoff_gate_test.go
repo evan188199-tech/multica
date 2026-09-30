@@ -60,6 +60,13 @@ func TestAssignedSquadHandoffRequiresVerifiedDelivery(t *testing.T) {
 	check("unrelated run", "agent", unrelated, "comment", 0)
 	check("missing source task", "agent", "", "comment", 0)
 	check("system failure relay", "system", delegated, "comment", 0)
+	// An explicit @ remains a deliberate dispatch even from an interim note.
+	mention := "please continue [@handoff squad](mention://squad/" + squad + ")"
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, mention, nil, "agent", worker,
+		commentTriggerComputeOptions{OriginatorUserID: testUserID, CommentType: "progress_update", AuthoringTaskID: parseUUID(delegated)})
+	if len(triggers) != 1 || triggers[0].Source != commentTriggerSourceMentionSquadLeader {
+		t.Fatalf("explicit squad mention in progress note did not dispatch: %+v", triggers)
+	}
 	for _, tc := range []struct {
 		kind string
 		want int
