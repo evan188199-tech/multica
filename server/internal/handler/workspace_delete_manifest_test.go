@@ -21,6 +21,7 @@ const (
 var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"activity_log":                       workspaceDelete,
 	"agent":                              workspaceDelete,
+	"agent_quota_group_block":            workspaceDeleteKeep, // Owner-level provider account gate survives deleting one workspace.
 	"agent_builder_draft":                workspaceDelete,
 	"agent_invocation_target":            workspaceDelete,
 	"agent_runtime":                      workspaceDelete,
