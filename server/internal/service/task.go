@@ -4922,7 +4922,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			if err != nil {
 				return fmt.Errorf("load quota group agent: %w", err)
 			}
-			if group := quotagroup.FromRuntimeConfig(agent.RuntimeConfig); group != "" {
+			if group := quotagroup.FromRuntimeConfig(agent.RuntimeConfig); group != "" && agent.OwnerID.Valid {
 				if err := qtx.UpsertAgentQuotaGroupBlock(ctx, db.UpsertAgentQuotaGroupBlockParams{
 					OwnerID: agent.OwnerID, GroupKey: group,
 					Reason: string(taskfailure.ReasonAgentProviderQuotaLimit), FailureTaskID: t.ID,

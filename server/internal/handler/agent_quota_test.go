@@ -85,3 +85,37 @@ func TestQuotaGroupBlocksSharedAgentsUntilOwnerClears(t *testing.T) {
 		t.Fatalf("claim after human clear = %+v, err %v", next, err)
 	}
 }
+
+// Legacy ownerless agents must still record a terminal failure even if their
+// runtime_config contains a quota label; no owner-scoped gate can be written.
+func TestQuotaGroupOwnerlessAgentFailureDoesNotRollback(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtime := dbfx.Runtime(t, "quota-ownerless-runtime")
+	agent := dbfx.Agent(t, "quota-ownerless", runtime, testutil.Cols{
+		"runtime_config": testutil.Raw(`'{"quota_group":"legacy-ownerless-test"}'::jsonb`),
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET owner_id=NULL WHERE id=$1`, agent); err != nil {
+		t.Fatal(err)
+	}
+	issue := dbfx.Issue(t, "quota ownerless failure")
+	task := dbfx.Task(t, agent, testutil.Cols{
+		"runtime_id": runtime, "issue_id": issue, "status": "running",
+		"attempt": 1, "max_attempts": 1,
+	})
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(task),
+		"API Error: 403 You've reached your 5-hour usage limit", "", "", "",
+		"agent_error.provider_auth_or_access", false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id=$1`, task).Scan(&status); err != nil || status != "failed" {
+		t.Fatalf("ownerless task status = %q, err %v", status, err)
+	}
+	var blocks int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_quota_group_block WHERE group_key='legacy-ownerless-test'`).Scan(&blocks); err != nil || blocks != 0 {
+		t.Fatalf("ownerless quota blocks = %d, err %v", blocks, err)
+	}
+}

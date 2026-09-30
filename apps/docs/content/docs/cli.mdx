@@ -356,9 +356,15 @@ agent owner. Keep provider tokens in the existing secret environment path;
 the group label must not be a token or account identifier.
 
 ```bash
+# Only when the agent's existing runtime_config is empty:
 multica agent update <agent-id> --runtime-config '{"quota_group":"shared-kimi-plan"}'
 multica agent quota status <agent-id>
 ```
+
+For an existing nonempty `runtime_config`, inspect it with `multica agent get
+<agent-id>` and add `quota_group` to the full JSON object before updating.
+`--runtime-config` replaces the object; it does not merge keys.
+Quota grouping requires the agents to have the same owner.
 
 When a run fails with a provider usage-limit response, Multica blocks new
 task claims for every agent in that owner's group. Queued tasks stay queued;
