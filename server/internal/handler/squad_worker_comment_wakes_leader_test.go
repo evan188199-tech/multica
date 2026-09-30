@@ -72,6 +72,7 @@ func TestCreateComment_GuestSquadWorkerRouting_GH8301(t *testing.T) {
 	}{
 		{mode: "live", name: "live guest delegation", wantGuest: 1},
 		{mode: "leader_changed", name: "changed guest leader fails closed"},
+		{mode: "wrong_lineage", name: "worker without delegation cannot return to guest leader"},
 		{mode: "permission_denied", name: "guest permission denied fails closed"},
 		{mode: "deleted", name: "deleted guest delegation cannot claim assigned squad"},
 	}
@@ -120,6 +121,8 @@ func TestCreateComment_GuestSquadWorkerRouting_GH8301(t *testing.T) {
 			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 
 			switch mode {
+			case "wrong_lineage":
+				dbfx.Exec(t, `UPDATE agent_task_queue SET delegated_from_task_id = NULL WHERE id = $1`, workerTaskID)
 			case "leader_changed":
 				dbfx.Exec(t, `UPDATE squad SET leader_id = $2 WHERE id = $1`, guestSquadID, replacementID)
 			case "permission_denied":

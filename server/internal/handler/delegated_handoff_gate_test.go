@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -55,4 +58,24 @@ func TestAssignedSquadHandoffRequiresVerifiedDelivery(t *testing.T) {
 	check("unrelated run", "agent", unrelated, "comment", 0)
 	check("missing source task", "agent", "", "comment", 0)
 	check("system failure relay", "system", delegated, "comment", 0)
+	for _, tc := range []struct {
+		kind string
+		want int
+	}{{"comment", 1}, {"progress_update", 0}} {
+		r := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments/trigger-preview", CommentTriggerPreviewRequest{Content: "Work status", Type: tc.kind}), "id", issueID)
+		r.Header.Set("X-Agent-ID", worker)
+		r.Header.Set("X-Task-ID", delegated)
+		w := httptest.NewRecorder()
+		testHandler.PreviewCommentTriggers(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s preview status %d: %s", tc.kind, w.Code, w.Body.String())
+		}
+		var preview CommentTriggerPreviewResponse
+		if err := json.NewDecoder(w.Body).Decode(&preview); err != nil {
+			t.Fatal(err)
+		}
+		if len(preview.Agents) != tc.want {
+			t.Fatalf("%s preview agents = %d, want %d", tc.kind, len(preview.Agents), tc.want)
+		}
+	}
 }

@@ -1499,6 +1499,7 @@ type CreateCommentRequest struct {
 
 type CommentTriggerPreviewRequest struct {
 	Content          string  `json:"content"`
+	Type             string  `json:"type,omitempty"`
 	ParentID         *string `json:"parent_id"`
 	EditingCommentID *string `json:"editing_comment_id"`
 }
@@ -1662,7 +1663,15 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	if actorType == "agent" {
 		opts.AuthoringTaskID = h.commentSourceTaskID(r)
 	}
-	opts.CommentType = "comment"
+	opts.CommentType = req.Type
+	if editingComment != nil {
+		opts.CommentType = editingComment.Type
+	} else if opts.CommentType == "" {
+		opts.CommentType = "comment"
+	} else if !isClientAuthorableCommentType(opts.CommentType) {
+		writeError(w, http.StatusBadRequest, "invalid comment type")
+		return
+	}
 	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{
 		Agents:  make([]CommentTriggerAgentResponse, 0, len(triggers)),
@@ -2920,7 +2929,8 @@ func (h *Handler) routeGuestSquadLeaderFallback(ctx context.Context, issue db.Is
 	}
 	leaderTask, err := h.Queries.GetAgentTask(ctx, parent.SourceTaskID)
 	if err != nil || !leaderTask.IsLeaderTask || !leaderTask.SquadID.Valid ||
-		!leaderTask.AgentID.Valid || leaderTask.AgentID != parent.AuthorID {
+		!leaderTask.AgentID.Valid || leaderTask.AgentID != parent.AuthorID ||
+		workerTask.DelegatedFromTaskID != leaderTask.ID {
 		return nil, false
 	}
 	// Preserve the established assigned-squad path when this delegation came
