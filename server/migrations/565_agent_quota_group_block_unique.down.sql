@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS agent_quota_group_block_owner_group_idx;

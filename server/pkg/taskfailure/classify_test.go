@@ -231,8 +231,6 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.
 		{"429 rate limit", "API Error: 429 rate limit reached", ReasonAgentProviderCapacityOrRateLimit},
-		{"Kimi 403 five-hour quota", "API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
-		{"403 access remains auth", "API Error: 403 You do not have access to this model", ReasonAgentProviderAuthOrAccess},
 
 		// "exit status" co-occurring with a stronger upstream marker
 		// — the upstream classification should win because the
@@ -612,15 +610,5 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 
 	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
-	}
-}
-
-func TestNormalizeDaemonReasonKimiUsageLimit403(t *testing.T) {
-	raw := "API Error: 403 You've reached your 5-hour usage limit"
-	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), raw); got != ReasonAgentProviderQuotaLimit {
-		t.Fatalf("usage-limit 403 = %s, want quota", got)
-	}
-	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 403 model access denied"); got != ReasonAgentProviderAuthOrAccess {
-		t.Fatalf("ordinary 403 = %s, want auth", got)
 	}
 }

@@ -85,12 +85,6 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, concurrentRequestLimitWitness):
 		return ReasonAgentProviderCapacityOrRateLimit
 
-	// Some providers use HTTP 403 for an exhausted subscription window.
-	// The explicit usage-limit witness wins over the generic 403 auth code,
-	// but a bare 403 without this witness remains an access failure.
-	case strings.Contains(lower, "usage limit") && !strings.Contains(lower, "context"):
-		return ReasonAgentProviderQuotaLimit
-
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
 	//    rule below.
@@ -517,14 +511,6 @@ var legacyConcurrentRequestLimitReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
-	// Older daemons classify every 403 as auth before seeing the provider's
-	// explicit usage-limit message. Correct that wire label at the server
-	// boundary so quota handling works during a rolling daemon upgrade.
-	if reason == string(ReasonAgentProviderAuthOrAccess) &&
-		strings.Contains(strings.ToLower(rawError), "usage limit") &&
-		!strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
-		return ReasonAgentProviderQuotaLimit
-	}
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
