@@ -80,6 +80,14 @@ type AgentMcpServer struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentQuotaGroupBlock struct {
+	OwnerID       pgtype.UUID        `json:"owner_id"`
+	GroupKey      string             `json:"group_key"`
+	BlockedAt     pgtype.Timestamptz `json:"blocked_at"`
+	Reason        string             `json:"reason"`
+	FailureTaskID pgtype.UUID        `json:"failure_task_id"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

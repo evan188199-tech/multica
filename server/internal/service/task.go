@@ -31,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/quotagroup"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -4913,6 +4914,24 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 		task = t
 
+		// Persist an opt-in account-level block with the failed task. A later
+		// claim for any agent sharing this owner's quota group then fails closed,
+		// including batch claims. Terminal callback replays cannot block again.
+		if failureReason == string(taskfailure.ReasonAgentProviderQuotaLimit) {
+			agent, err := qtx.GetAgent(ctx, t.AgentID)
+			if err != nil {
+				return fmt.Errorf("load quota group agent: %w", err)
+			}
+			if group := quotagroup.FromRuntimeConfig(agent.RuntimeConfig); group != "" {
+				if err := qtx.UpsertAgentQuotaGroupBlock(ctx, db.UpsertAgentQuotaGroupBlockParams{
+					OwnerID: agent.OwnerID, GroupKey: group,
+					Reason: string(taskfailure.ReasonAgentProviderQuotaLimit), FailureTaskID: t.ID,
+				}); err != nil {
+					return fmt.Errorf("block quota group: %w", err)
+				}
+			}
+		}
+
 		// Atomic with the status flip, same as the completion path. A failed
 		// coordinator that already received the recovery comment has consumed
 		// the obligation: the pre-existing delivered_comment_ids coverage check
@@ -7152,6 +7171,19 @@ func priorityToInt(p string) int32 {
 func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQueue) {
 	s.captureTaskQueued(ctx, task)
 	s.notifyTaskAvailable(task)
+}
+
+// NotifyQuotaGroupCleared lets every runtime hosting this owner's group
+// reconsider queued work after an explicit human unblock.
+func (s *TaskService) NotifyQuotaGroupCleared(ctx context.Context, ownerID pgtype.UUID, group string) error {
+	runtimes, err := s.Queries.ListAgentQuotaGroupRuntimes(ctx, db.ListAgentQuotaGroupRuntimesParams{OwnerID: ownerID, GroupKey: group})
+	if err != nil {
+		return err
+	}
+	for _, runtimeID := range runtimes {
+		s.notifyRuntimeMayHaveWork(runtimeID, "")
+	}
+	return nil
 }
 
 // NotifyTaskFinished invalidates a runtime's empty-claim verdict and emits a

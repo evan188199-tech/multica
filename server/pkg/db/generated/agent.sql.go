@@ -1545,6 +1545,11 @@ WHERE id = (
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
             AND a.runtime_id = atq.runtime_id
+            AND NOT EXISTS (
+                SELECT 1 FROM agent_quota_group_block b
+                WHERE b.owner_id = a.owner_id
+                  AND b.group_key = a.runtime_config->>'quota_group'
+            )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
@@ -6041,6 +6046,11 @@ WHERE atq.runtime_id = $1
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND NOT EXISTS (
+            SELECT 1 FROM agent_quota_group_block b
+            WHERE b.owner_id = a.owner_id
+              AND b.group_key = a.runtime_config->>'quota_group'
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -6149,6 +6159,11 @@ WHERE atq.runtime_id = ANY($1::uuid[])
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
         AND a.runtime_id = atq.runtime_id
+        AND NOT EXISTS (
+            SELECT 1 FROM agent_quota_group_block b
+            WHERE b.owner_id = a.owner_id
+              AND b.group_key = a.runtime_config->>'quota_group'
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'

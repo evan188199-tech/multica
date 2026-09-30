@@ -77,6 +77,11 @@ var agentAvatarCmd = &cobra.Command{
 	RunE:  runAgentAvatar,
 }
 
+// Quota group controls are owner-only and use a non-secret account alias.
+var agentQuotaCmd = &cobra.Command{Use: "quota", Short: "Inspect or clear an agent quota group gate"}
+var agentQuotaStatusCmd = &cobra.Command{Use: "status <agent-id>", Args: exactArgs(1), RunE: runAgentQuotaStatus}
+var agentQuotaClearCmd = &cobra.Command{Use: "clear <agent-id>", Short: "Clear a quota gate after verifying provider recovery", Args: exactArgs(1), RunE: runAgentQuotaClear}
+
 // Agent skills subcommands.
 
 var agentSkillsCmd = &cobra.Command{
@@ -141,6 +146,10 @@ func init() {
 	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 	agentCmd.AddCommand(agentEnvCmd)
+	agentCmd.AddCommand(agentQuotaCmd)
+	agentQuotaCmd.AddCommand(agentQuotaStatusCmd, agentQuotaClearCmd)
+	agentQuotaStatusCmd.Flags().String("output", "json", "Output format: json or table")
+	agentQuotaClearCmd.Flags().String("output", "json", "Output format: json or table")
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
@@ -1143,6 +1152,44 @@ func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result j
 // ---------------------------------------------------------------------------
 // Agent env subcommands
 // ---------------------------------------------------------------------------
+
+func runAgentQuotaStatus(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/quota", &result); err != nil {
+		return fmt.Errorf("get agent quota: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	cli.PrintTable(os.Stdout, []string{"AGENT", "GROUP", "BLOCKED"}, [][]string{{args[0], strVal(result, "group"), fmt.Sprint(result["blocked"])}})
+	return nil
+}
+
+func runAgentQuotaClear(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/quota/clear", nil, &result); err != nil {
+		return fmt.Errorf("clear agent quota: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Quota gate cleared for group %s\n", strVal(result, "group"))
+	return nil
+}
 
 // runAgentEnvGet fetches the plaintext custom_env for a single agent
 // via the audited `/env` endpoint. The CLI prints raw JSON in JSON
