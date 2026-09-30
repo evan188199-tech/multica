@@ -2749,7 +2749,11 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if actorType != "member" {
-		if opts.CommentType == "progress_update" {
+		// Only a normal agent result comment can implicitly hand work back.
+		// Platform status and failure narration must stay quiet. Persisted
+		// comments and previews both supply Type; an empty type is retained
+		// as the legacy normal-comment default for in-process callers.
+		if opts.CommentType != "" && opts.CommentType != "comment" {
 			return nil, nil
 		}
 		// Agent-authored comments do not participate in the member-driven

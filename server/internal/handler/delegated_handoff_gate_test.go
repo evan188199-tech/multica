@@ -55,6 +55,8 @@ func TestAssignedSquadHandoffRequiresVerifiedDelivery(t *testing.T) {
 	}
 	check("verified delivery", "agent", delegated, "comment", 1)
 	check("progress update", "agent", delegated, "progress_update", 0)
+	check("status narration", "agent", delegated, "status_change", 0)
+	check("system comment type", "agent", delegated, "system", 0)
 	check("unrelated run", "agent", unrelated, "comment", 0)
 	check("missing source task", "agent", "", "comment", 0)
 	check("system failure relay", "system", delegated, "comment", 0)
