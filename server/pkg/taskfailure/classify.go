@@ -85,6 +85,20 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, concurrentRequestLimitWitness):
 		return ReasonAgentProviderCapacityOrRateLimit
 
+	// Some providers use HTTP 403 for an exhausted subscription window.
+	// Kimi Code's official wording is "You've reached your 5-hour usage
+	// limit" (likewise weekly (7-day) and monthly); without this rule the
+	// bare 403 in the CLI's wrapper ("error, status code: 403, message: …")
+	// wins the auth race below, the UI tells the user to sign in again, and
+	// the account's real state — a shared quota window that resets on its
+	// own — stays invisible. The explicit usage-limit witness wins over the
+	// generic 403 auth code, but a bare 403 without this witness remains an
+	// access failure. "context" keeps a context-window "usage limit"
+	// phrasing out of here (rule 1 normally catches those first; this guards
+	// wordings it misses).
+	case strings.Contains(lower, "usage limit") && !strings.Contains(lower, "context"):
+		return ReasonAgentProviderQuotaLimit
+
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
 	//    rule below.
@@ -511,6 +525,16 @@ var legacyConcurrentRequestLimitReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	// Older daemons classify every 403 as auth before seeing the provider's
+	// explicit usage-limit message (Kimi Code's 5-hour / weekly / monthly
+	// windows). Correct that wire label at the server boundary so quota
+	// handling works during a rolling daemon upgrade. The concurrency
+	// witness is excluded: that 403 is a capacity rejection, not quota.
+	if reason == string(ReasonAgentProviderAuthOrAccess) &&
+		strings.Contains(strings.ToLower(rawError), "usage limit") &&
+		!strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
+		return ReasonAgentProviderQuotaLimit
+	}
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit

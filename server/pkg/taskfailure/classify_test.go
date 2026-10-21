@@ -247,6 +247,68 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 	}
 }
 
+// TestClassifyUsageLimit403IsQuota pins Kimi Code's official 403 usage-window
+// wordings onto the quota bucket. Kimi bills its subscription windows (5-hour
+// rolling, weekly, monthly) with HTTP 403, so before these witnesses ran
+// ahead of the auth rule the raw "status code: 403" in the CLI wrapper won
+// and the UI told the user to sign in again for what was really a shared
+// quota window that resets on its own (AGEN-60).
+func TestClassifyUsageLimit403IsQuota(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"kimi 5-hour 403", `error, status code: 403, message: You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota`, ReasonAgentProviderQuotaLimit},
+		{"kimi weekly 403", `error, status code: 403, message: You've reached your weekly (7-day) usage limit. Your quota will reset when the current 7-day window ends.`, ReasonAgentProviderQuotaLimit},
+		{"kimi monthly 403", `error, status code: 403, message: You've reached your monthly usage limit for this billing cycle.`, ReasonAgentProviderQuotaLimit},
+		{"usage limit without a status code", "You've reached your usage limit for this plan", ReasonAgentProviderQuotaLimit},
+		// The witness must beat the 403 auth code, but a 403 that says
+		// nothing about usage stays an access failure.
+		{"bare 403 still auth", "HTTP 403 Forbidden", ReasonAgentProviderAuthOrAccess},
+		// Kimi's concurrency 403 shares the "You've reached your" opening
+		// and is capacity, not quota — the dedicated witness handles it
+		// ahead of both rules.
+		{"kimi concurrent 403 stays capacity", `error, status code: 403, message: You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.`, ReasonAgentProviderCapacityOrRateLimit},
+		// A context-window phrasing containing "usage limit" belongs to the
+		// context bucket: rule 1's explicit context witnesses run ahead of
+		// the quota witness.
+		{"context usage limit stays context", "the model hit its context window limit while under the usage limit", ReasonAgentContextOverflow},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Classify(c.in); got != c.want {
+				t.Fatalf("Classify(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesUsageLimit mirrors the in-flight rule for
+// daemons whose own classifier predates it: they report auth for these 403s,
+// and the server boundary corrects the label so quota handling works during a
+// rolling upgrade.
+func TestNormalizeDaemonReasonUpgradesUsageLimit(t *testing.T) {
+	t.Parallel()
+
+	const raw = `error, status code: 403, message: You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.`
+
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), raw); got != ReasonAgentProviderQuotaLimit {
+		t.Fatalf("NormalizeDaemonReason(auth, kimi 5h 403) = %s, want %s", got, ReasonAgentProviderQuotaLimit)
+	}
+	// The concurrency exclusion: that 403 upgrades to capacity, never quota.
+	const concurrent = `error, status code: 403, message: You've reached your concurrent request limit.`
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), concurrent); got != ReasonAgentProviderCapacityOrRateLimit {
+		t.Fatalf("NormalizeDaemonReason(auth, concurrent 403) = %s, want %s", got, ReasonAgentProviderCapacityOrRateLimit)
+	}
+	// A reason that already says more than the witness must survive.
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), raw); got != ReasonAgentContextOverflow {
+		t.Fatalf("NormalizeDaemonReason(context_overflow, kimi 5h 403) = %s, want it unchanged", got)
+	}
+}
+
 func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
 	t.Parallel()
 

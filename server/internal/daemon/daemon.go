@@ -36,6 +36,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
+	"github.com/multica-ai/multica/server/pkg/usagegate"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -662,6 +663,11 @@ type Daemon struct {
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
 
+	// usageGate blocks new runs on providers whose subscription quota window
+	// was observed exhausted (Kimi's 5-hour 403) until the window's estimated
+	// reset. Account-scoped, in-process; see pkg/usagegate. Nil disables.
+	usageGate *usagegate.Gate
+
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 	// taskSlotWait is the brief semaphore wait before the capacity backoff.
@@ -733,6 +739,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		activeStores:                make(map[string]int),
 		deletingStores:              make(map[string]bool),
 		localPathLocks:              NewLocalPathLocker(),
+		usageGate:                   usagegate.New(),
 		runtimeGoneInflight:         make(map[string]struct{}),
 		pendingWorkInflight:         make(map[string]struct{}),
 		pendingWorkLastRun:          make(map[string]time.Time),
@@ -7674,6 +7681,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
 
+	// Account-level quota cooldown (Kimi 5-hour/weekly/monthly 403s): refuse
+	// BEFORE any preparation or CLI spawn. A run against an exhausted shared
+	// window fails within seconds whatever we do, so the only question is
+	// whether it burns a provider request and dispatch noise on the way —
+	// and whether its failure_reason describes a cooldown instead of the
+	// authentication problem the raw 403 used to suggest.
+	if gateErr := d.checkUsageWindowGate(provider, task); gateErr != nil {
+		taskLog.Warn("refusing to start run: provider account quota window is on cooldown", "error", gateErr)
+		return TaskResult{}, gateErr
+	}
+
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
 	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
 	prepareComplete := false
@@ -9061,6 +9079,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
 		}
+		// A witnessed subscription-window exhaustion (Kimi's 5-hour 403 et
+		// al.) arms the account cooldown for every later run on this daemon
+		// that bills the same account — including other agents sharing the
+		// login. Reads the raw errMsg before any annotation, same contract
+		// as the classifiers above; a no-op for every other failure shape.
+		d.observeUsageWindowFailure(provider, task, errMsg, time.Now())
 		// After the classifiers above have read errMsg. Each hint is fixed
 		// prose chosen to match none of the resume guards (see its const), so
 		// ordering is not what makes it safe — but it keeps the machine
